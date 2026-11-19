@@ -454,7 +454,6 @@ onUnmounted(() => {
         </button>
       </form>
 
-      <p class="login-hint">默认账号 admin / admin，可通过 -web-user 和 -web-password 修改</p>
     </div>
   </div>
 

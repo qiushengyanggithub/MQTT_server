@@ -30,7 +30,7 @@ func main() {
 	webDist := flag.String("web-dist", "web/dist", "path to the built Vue3 frontend")
 	webToken := flag.String("web-token", "", "optional static bearer token for the web API")
 	webUser := flag.String("web-user", "admin", "username for the web dashboard login")
-	webPassword := flag.String("web-password", "admin", "password for the web dashboard login")
+	webPassword := flag.String("web-password", "@admin@123", "password for the web dashboard login")
 	usersFile := flag.String("users-file", "users.json", "path to the MQTT user database (empty to disable persistence)")
 	flag.Parse()
 
