@@ -4,3 +4,5 @@ cmd/mqtt
 .idea
 vendor
 web/node_modules
+users.json
+webcheck.exe

@@ -28,7 +28,10 @@ func main() {
 	tlsKeyFile := flag.String("tls-key-file", "", "TLS key file")
 	webAddr := flag.String("web-addr", ":8081", "network address for the web dashboard and REST API (empty to disable)")
 	webDist := flag.String("web-dist", "web/dist", "path to the built Vue3 frontend")
-	webToken := flag.String("web-token", "", "optional bearer token required by the web API")
+	webToken := flag.String("web-token", "", "optional static bearer token for the web API")
+	webUser := flag.String("web-user", "admin", "username for the web dashboard login")
+	webPassword := flag.String("web-password", "admin", "password for the web dashboard login")
+	usersFile := flag.String("users-file", "users.json", "path to the MQTT user database (empty to disable persistence)")
 	flag.Parse()
 
 	sigs := make(chan os.Signal, 1)
@@ -52,14 +55,22 @@ func main() {
 	}
 
 	server := mqtt.New(&mqtt.Options{InlineClient: true})
-	_ = server.AddHook(new(auth.AllowHook), nil)
+
+	ledger := &auth.Ledger{}
+	userStore, err := api.NewUserStore(ledger, *usersFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := server.AddHook(&api.UserAuthHook{Store: userStore}, nil); err != nil {
+		log.Fatal(err)
+	}
 
 	tcp := listeners.NewTCP(listeners.Config{
 		ID:        "t1",
 		Address:   *tcpAddr,
 		TLSConfig: tlsConfig,
 	})
-	err := server.AddListener(tcp)
+	err = server.AddListener(tcp)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -95,9 +106,12 @@ func main() {
 	var web *api.Server
 	if *webAddr != "" {
 		web, err = api.New(server, api.Config{
-			Addr:  *webAddr,
-			Dist:  *webDist,
-			Token: *webToken,
+			Addr:        *webAddr,
+			Dist:        *webDist,
+			Token:       *webToken,
+			WebUser:     *webUser,
+			WebPassword: *webPassword,
+			UserStore:   userStore,
 		})
 		if err != nil {
 			log.Fatal(err)

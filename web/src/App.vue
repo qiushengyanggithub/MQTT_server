@@ -1,5 +1,5 @@
 <script setup>
-import { computed, markRaw, onMounted, onUnmounted, ref } from 'vue'
+import { computed, markRaw, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   AntDesignOutlined,
   CheckCircleOutlined,
@@ -10,24 +10,40 @@ import {
   DatabaseOutlined,
   DeleteOutlined,
   DesktopOutlined,
+  DisconnectOutlined,
+  EditOutlined,
   FilterOutlined,
   InboxOutlined,
   KeyOutlined,
   LoadingOutlined,
+  LogoutOutlined,
   MessageOutlined,
+  PlusOutlined,
   ReloadOutlined,
+  SafetyCertificateOutlined,
   SendOutlined,
+  StopOutlined,
   SwapOutlined,
   ThunderboltOutlined,
+  UserAddOutlined,
+  UserOutlined,
 } from '@ant-design/icons-vue'
 import {
   getOverview,
   getClients,
   getSubscriptions,
   getRetained,
+  getUsers,
+  createUser,
+  updateUser,
+  deleteUser,
+  kickClient,
+  setUserDisallowed,
   publishMessage,
   streamMessages,
   setToken,
+  login,
+  logout,
 } from './api'
 
 const tabs = [
@@ -35,9 +51,15 @@ const tabs = [
   { id: 'clients', label: '客户端', icon: markRaw(DesktopOutlined), desc: '当前连接的 MQTT 客户端' },
   { id: 'subscriptions', label: '订阅', icon: markRaw(FilterOutlined), desc: '客户端订阅的 Topic Filter' },
   { id: 'retained', label: '保留消息', icon: markRaw(DatabaseOutlined), desc: 'Broker 当前保存的 Retained 消息' },
+  { id: 'users', label: '用户管理', icon: markRaw(SafetyCertificateOutlined), desc: 'MQTT 连接账号与 Topic ACL 权限' },
   { id: 'publish', label: '发布消息', icon: markRaw(SendOutlined), desc: '通过服务端 Inline Client 发布消息' },
   { id: 'messages', label: '实时消息', icon: markRaw(MessageOutlined), desc: 'SSE 实时推送的最新发布消息' },
 ]
+
+const loggedIn = ref(Boolean(localStorage.getItem('mqtt_web_token')))
+const loginForm = ref({ username: 'admin', password: '' })
+const loginError = ref('')
+const loggingIn = ref(false)
 
 const tab = ref('overview')
 const overview = ref(null)
@@ -50,6 +72,18 @@ const streamStatus = ref('connecting')
 const tokenInput = ref(localStorage.getItem('mqtt_web_token') || '')
 const publishResult = ref('')
 const form = ref({ topic: 'test/topic', payload: 'hello mochi', qos: 0, retain: false })
+
+const users = ref([])
+const editingUser = ref(null)
+const userResult = ref('')
+const clientResult = ref('')
+const userForm = ref({ username: '', password: '', disallow: false, acl: [] })
+const accessOptions = [
+  { value: 0, label: '拒绝' },
+  { value: 1, label: '只读' },
+  { value: 2, label: '只写' },
+  { value: 3, label: '读写' },
+]
 
 let refreshTimer = null
 let eventSource = null
@@ -183,16 +217,18 @@ function payloadText(item) {
 async function refresh() {
   try {
     error.value = ''
-    const [o, c, s, r] = await Promise.all([
+    const [o, c, s, r, u] = await Promise.all([
       getOverview(),
       getClients(),
       getSubscriptions(),
       getRetained(),
+      getUsers(),
     ])
     overview.value = o
     clients.value = c
     subscriptions.value = s
     retained.value = r
+    users.value = u
   } catch (e) {
     error.value = e.message || String(e)
   }
@@ -211,6 +247,101 @@ async function doPublish() {
     await refresh()
   } catch (e) {
     publishResult.value = `发布失败: ${e.message || e}`
+  }
+}
+
+function resetUserForm() {
+  editingUser.value = null
+  userResult.value = ''
+  userForm.value = { username: '', password: '', disallow: false, acl: [] }
+}
+
+function editUser(user) {
+  editingUser.value = user.username
+  userResult.value = ''
+  userForm.value = {
+    username: user.username,
+    password: '',
+    disallow: user.disallow,
+    acl: user.acl.map((item) => ({ filter: item.filter, access: item.access })),
+  }
+}
+
+function addACLRule() {
+  userForm.value.acl.push({ filter: '', access: 3 })
+}
+
+function removeACLRule(index) {
+  userForm.value.acl.splice(index, 1)
+}
+
+async function saveUser() {
+  userResult.value = ''
+  const payload = {
+    username: userForm.value.username.trim(),
+    password: userForm.value.password,
+    disallow: userForm.value.disallow,
+    acl: userForm.value.acl.filter((item) => item.filter.trim() !== ''),
+  }
+  try {
+    if (editingUser.value) {
+      await updateUser(editingUser.value, payload)
+      userResult.value = '用户更新成功'
+    } else {
+      await createUser(payload)
+      userResult.value = '用户创建成功'
+    }
+    resetUserForm()
+    await refresh()
+  } catch (e) {
+    userResult.value = `操作失败: ${e.message || e}`
+  }
+}
+
+async function removeUser(user) {
+  if (!window.confirm(`确定删除用户 ${user.username} 吗？`)) return
+  userResult.value = ''
+  try {
+    await deleteUser(user.username)
+    if (editingUser.value === user.username) resetUserForm()
+    userResult.value = '用户已删除'
+    await refresh()
+  } catch (e) {
+    userResult.value = `删除失败: ${e.message || e}`
+  }
+}
+
+function findUser(username) {
+  return users.value.find((item) => item.username === username) || null
+}
+
+async function kick(cl) {
+  if (!window.confirm(`确定踢出客户端 ${cl.id} 吗？`)) return
+  clientResult.value = ''
+  try {
+    await kickClient(cl.id)
+    clientResult.value = `已踢出 ${cl.id}`
+    await refresh()
+  } catch (e) {
+    clientResult.value = `踢出失败: ${e.message || e}`
+  }
+}
+
+async function toggleUserDisallow(cl) {
+  const user = findUser(cl.username)
+  if (!user) {
+    clientResult.value = '该连接没有对应的管理用户'
+    return
+  }
+  const action = user.disallow ? '启用' : '禁用'
+  if (!window.confirm(`确定${action}用户 ${user.username} 吗？禁用会同时踢出该用户所有连接。`)) return
+  clientResult.value = ''
+  try {
+    await setUserDisallowed(user.username, !user.disallow)
+    clientResult.value = `${action}用户 ${user.username} 成功`
+    await refresh()
+  } catch (e) {
+    clientResult.value = `${action}失败: ${e.message || e}`
   }
 }
 
@@ -235,20 +366,99 @@ function applyToken() {
   refresh()
 }
 
+async function doLogin() {
+  loginError.value = ''
+  loggingIn.value = true
+  try {
+    const result = await login(loginForm.value.username.trim(), loginForm.value.password)
+    setToken(result.token)
+    loggedIn.value = true
+    await refresh()
+    connectStream()
+  } catch (e) {
+    loginError.value = e.message || String(e)
+  } finally {
+    loggingIn.value = false
+  }
+}
+
+async function doLogout() {
+  try {
+    await logout()
+  } catch (_) {
+    // ignore network errors, clear local state anyway
+  }
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+  setToken('')
+  loggedIn.value = false
+  messages.value = []
+}
+
+function handleAuthExpired() {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+  loggedIn.value = false
+}
+
+watch(tab, (current) => {
+  if (current === 'users' && loggedIn.value) refresh()
+})
+
 onMounted(() => {
-  refresh()
-  connectStream()
-  refreshTimer = setInterval(refresh, 5000)
+  window.addEventListener('auth-expired', handleAuthExpired)
+  if (loggedIn.value) {
+    refresh()
+    connectStream()
+  }
+  refreshTimer = setInterval(() => {
+    if (loggedIn.value) refresh()
+  }, 5000)
 })
 
 onUnmounted(() => {
   clearInterval(refreshTimer)
   if (eventSource) eventSource.close()
+  window.removeEventListener('auth-expired', handleAuthExpired)
 })
 </script>
 
 <template>
-  <div class="shell">
+  <div v-if="!loggedIn" class="login-page">
+    <div class="login-card">
+      <div class="login-brand">
+        <span class="logo"><AntDesignOutlined /></span>
+        <div>
+          <h1>Mochi MQTT 控制台</h1>
+          <p>请登录后继续管理 Broker</p>
+        </div>
+      </div>
+
+      <form class="login-form" @submit.prevent="doLogin">
+        <label>
+          <span class="field-label"><UserOutlined /> 用户名</span>
+          <input v-model="loginForm.username" type="text" autocomplete="username" placeholder="请输入用户名" />
+        </label>
+        <label>
+          <span class="field-label"><KeyOutlined /> 密码</span>
+          <input v-model="loginForm.password" type="password" autocomplete="current-password" placeholder="请输入密码" />
+        </label>
+        <div v-if="loginError" class="error-banner"><CloseCircleOutlined /> {{ loginError }}</div>
+        <button class="btn primary login-btn" type="submit" :disabled="loggingIn">
+          <component :is="loggingIn ? LoadingOutlined : SafetyCertificateOutlined" />
+          {{ loggingIn ? '登录中…' : '登录' }}
+        </button>
+      </form>
+
+      <p class="login-hint">默认账号 admin / admin，可通过 -web-user 和 -web-password 修改</p>
+    </div>
+  </div>
+
+  <div v-else class="shell">
     <header class="topbar">
       <div class="brand">
         <span class="logo"><AntDesignOutlined /></span>
@@ -274,6 +484,7 @@ onUnmounted(() => {
         </div>
         <button class="btn ghost" @click="applyToken">应用</button>
         <button class="btn primary" @click="refresh"><ReloadOutlined /> 刷新</button>
+        <button class="btn ghost" @click="doLogout"><LogoutOutlined /> 退出</button>
       </div>
     </header>
 
@@ -305,6 +516,7 @@ onUnmounted(() => {
           <span>{{ item.label }}</span>
           <span v-if="item.id === 'clients'" class="badge">{{ clients.length }}</span>
           <span v-if="item.id === 'subscriptions'" class="badge">{{ subscriptions.length }}</span>
+          <span v-if="item.id === 'users'" class="badge">{{ users.length }}</span>
           <span v-if="item.id === 'messages'" class="badge">{{ messages.length }}</span>
         </button>
       </nav>
@@ -318,6 +530,7 @@ onUnmounted(() => {
               <p>{{ activeTab.desc }}</p>
             </div>
           </div>
+          <span v-if="clientResult" class="hint">{{ clientResult }}</span>
         </div>
 
         <div v-if="tab === 'overview'" class="info-grid">
@@ -339,6 +552,7 @@ onUnmounted(() => {
                 <th>Keepalive</th>
                 <th>订阅</th>
                 <th>状态</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -356,9 +570,21 @@ onUnmounted(() => {
                     {{ cl.connected ? '在线' : '离线' }}
                   </span>
                 </td>
+                <td class="actions">
+                  <button class="btn text" :disabled="!cl.connected" @click="kick(cl)">
+                    <DisconnectOutlined /> 踢出
+                  </button>
+                  <button
+                    v-if="cl.username && findUser(cl.username)"
+                    class="btn text danger"
+                    @click="toggleUserDisallow(cl)"
+                  >
+                    <StopOutlined /> {{ findUser(cl.username).disallow ? '启用用户' : '禁用用户' }}
+                  </button>
+                </td>
               </tr>
               <tr v-if="!clients.length">
-                <td colspan="8" class="empty"><InboxOutlined /> 暂无客户端</td>
+                <td colspan="9" class="empty"><InboxOutlined /> 暂无客户端</td>
               </tr>
             </tbody>
           </table>
@@ -407,6 +633,116 @@ onUnmounted(() => {
               </tr>
               <tr v-if="!retained.length">
                 <td colspan="4" class="empty"><InboxOutlined /> 暂无保留消息</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-else-if="tab === 'users'" class="users-view">
+          <div class="user-form-card">
+            <div class="user-form-title">
+              <component :is="editingUser ? EditOutlined : UserAddOutlined" />
+              <strong>{{ editingUser ? `编辑用户 ${editingUser}` : '新增用户' }}</strong>
+            </div>
+            <p class="hint">
+              数据来源：启动参数 <code>-users-file</code> 指定的 JSON 文件（默认 <code>users.json</code>），进入本页会自动加载已有用户。
+            </p>
+
+            <div class="user-form-grid">
+              <label>
+                <span class="field-label"><UserOutlined /> 用户名</span>
+                <input v-model="userForm.username" type="text" placeholder="例如 device_01" />
+              </label>
+              <label>
+                <span class="field-label"><KeyOutlined /> 密码</span>
+                <input
+                  v-model="userForm.password"
+                  type="password"
+                  :placeholder="editingUser ? '留空则保持不变' : '必填'"
+                />
+              </label>
+              <label class="checkbox">
+                <input v-model="userForm.disallow" type="checkbox" />
+                禁用该用户
+              </label>
+            </div>
+
+            <div class="acl-editor">
+              <div class="acl-editor-head">
+                <span class="field-label"><SafetyCertificateOutlined /> Topic ACL</span>
+                <button class="btn text" @click="addACLRule"><PlusOutlined /> 添加规则</button>
+              </div>
+              <div v-for="(rule, index) in userForm.acl" :key="index" class="acl-row">
+                <input v-model="rule.filter" type="text" placeholder="例如 devices/#" />
+                <select v-model.number="rule.access">
+                  <option v-for="option in accessOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <button class="btn text danger" @click="removeACLRule(index)"><DeleteOutlined /></button>
+              </div>
+              <p v-if="!userForm.acl.length" class="hint">
+                未配置 ACL 时，该用户可访问所有 Topic。
+              </p>
+            </div>
+
+            <div class="form-actions">
+              <button class="btn primary" @click="saveUser">
+                <component :is="editingUser ? EditOutlined : PlusOutlined" />
+                {{ editingUser ? '保存修改' : '创建用户' }}
+              </button>
+              <button v-if="editingUser" class="btn" @click="resetUserForm">取消</button>
+              <span
+                :class="[
+                  'result',
+                  userResult.startsWith('操作失败') || userResult.startsWith('删除失败') ? 'failed' : '',
+                ]"
+              >{{ userResult }}</span>
+            </div>
+          </div>
+
+          <table class="users-table">
+            <thead>
+              <tr>
+                <th>用户名</th>
+                <th>状态</th>
+                <th>连接状态</th>
+                <th>密码</th>
+                <th>ACL 规则</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="user in users" :key="user.username">
+                <td class="mono">{{ user.username }}</td>
+                <td>
+                  <span :class="['pill', user.disallow ? 'off' : 'ok']">
+                    <component :is="user.disallow ? CloseCircleOutlined : CheckCircleOutlined" />
+                    {{ user.disallow ? '已禁用' : '正常' }}
+                  </span>
+                </td>
+                <td>
+                  <span :class="['pill', user.online ? 'ok' : 'off']">
+                    <component :is="user.online ? CheckCircleOutlined : CloseCircleOutlined" />
+                    {{ user.online ? `在线 · ${user.connections} 个连接` : '离线' }}
+                  </span>
+                </td>
+                <td class="mono">{{ user.password || '未设置' }}</td>
+                <td>
+                  <div v-if="user.acl.length" class="acl-tags">
+                    <span v-for="(rule, i) in user.acl" :key="i" class="acl-tag">
+                      {{ rule.filter }} · {{ rule.accessName }}
+                    </span>
+                  </div>
+                  <span v-else class="hint">全部 Topic</span>
+                </td>
+                <td class="actions">
+                  <button class="btn text" @click="editUser(user)"><EditOutlined /> 编辑</button>
+                  <button class="btn text danger" @click="removeUser(user)"><DeleteOutlined /> 删除</button>
+                </td>
+              </tr>
+              <tr v-if="!users.length">
+                <td colspan="6" class="empty"><InboxOutlined /> 暂无用户，请在上方创建，或用 -users-file 指定已有用户文件启动</td>
               </tr>
             </tbody>
           </table>

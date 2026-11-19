@@ -6,7 +6,9 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,29 +17,39 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	mqtt "github.com/mochi-mqtt/server/v2"
+	"github.com/mochi-mqtt/server/v2/packets"
 )
 
 // Config configures the web API server.
 type Config struct {
-	Addr  string
-	Dist  string
-	Token string
+	Addr        string
+	Dist        string
+	Token       string
+	WebUser     string
+	WebPassword string
+	UserStore   *UserStore
 }
 
 // Server owns the Gin engine and its MQTT bridge hook.
 type Server struct {
-	broker     *mqtt.Server
-	hook       *BrokerHook
-	engine     *gin.Engine
-	httpServer *http.Server
-	addr       string
-	dist       string
-	token      string
+	broker      *mqtt.Server
+	hook        *BrokerHook
+	engine      *gin.Engine
+	httpServer  *http.Server
+	addr        string
+	dist        string
+	token       string
+	webUser     string
+	webPassword string
+	sessionsMu  sync.Mutex
+	sessions    map[string]time.Time
+	users       *UserStore
 }
 
 // New attaches a publish hook to the broker and builds the Gin routes.
@@ -48,11 +60,15 @@ func New(broker *mqtt.Server, cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		broker: broker,
-		hook:   hook,
-		addr:   cfg.Addr,
-		dist:   cfg.Dist,
-		token:  cfg.Token,
+		broker:      broker,
+		hook:        hook,
+		addr:        cfg.Addr,
+		dist:        cfg.Dist,
+		token:       cfg.Token,
+		webUser:     cfg.WebUser,
+		webPassword: cfg.WebPassword,
+		sessions:    make(map[string]time.Time),
+		users:       cfg.UserStore,
 	}
 	if s.addr == "" {
 		s.addr = ":8081"
@@ -97,42 +113,117 @@ func (s *Server) Close(ctx context.Context) error {
 }
 
 func (s *Server) routes() {
+	public := s.engine.Group("/api")
+	public.POST("/login", s.login)
+	public.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
 	api := s.engine.Group("/api", s.authMiddleware())
 	{
-		api.GET("/health", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{"status": "ok"})
-		})
+		api.POST("/logout", s.logout)
 		api.GET("/overview", s.overview)
 		api.GET("/clients", s.clients)
+		api.DELETE("/clients/:id", s.kickClient)
 		api.GET("/subscriptions", s.subscriptions)
 		api.GET("/retained", s.retained)
 		api.GET("/messages/stream", s.streamMessages)
 		api.POST("/publish", s.publish)
+		api.GET("/users", s.listUsers)
+		api.POST("/users", s.createUser)
+		api.PUT("/users/:username", s.updateUser)
+		api.DELETE("/users/:username", s.deleteUser)
+		api.POST("/users/:username/disable", s.setUserDisallowed(true))
+		api.POST("/users/:username/enable", s.setUserDisallowed(false))
 	}
 
 	s.static()
 }
 
+func requestToken(c *gin.Context) string {
+	if token := c.Query("token"); token != "" {
+		return token
+	}
+	header := c.GetHeader("Authorization")
+	if len(header) > 7 && strings.EqualFold(header[:7], "Bearer ") {
+		return strings.TrimSpace(header[7:])
+	}
+	return ""
+}
+
+func (s *Server) validSession(token string) bool {
+	if token == "" {
+		return false
+	}
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	expires, ok := s.sessions[token]
+	if !ok {
+		return false
+	}
+	if time.Now().After(expires) {
+		delete(s.sessions, token)
+		return false
+	}
+	return true
+}
+
 func (s *Server) authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if s.token == "" {
+		if s.token == "" && s.webUser == "" {
 			c.Next()
 			return
 		}
 
-		token := c.Query("token")
-		if token == "" {
-			header := c.GetHeader("Authorization")
-			if len(header) > 7 && strings.EqualFold(header[:7], "Bearer ") {
-				token = strings.TrimSpace(header[7:])
-			}
-		}
-		if token != s.token {
+		token := requestToken(c)
+		if (s.token == "" || token != s.token) && !s.validSession(token) {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
 		c.Next()
 	}
+}
+
+type loginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+func (s *Server) login(c *gin.Context) {
+	if s.webUser == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "登录未启用"})
+		return
+	}
+
+	var req loginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Username != s.webUser || req.Password != s.webPassword {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
+		return
+	}
+
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	token := hex.EncodeToString(buf)
+	s.sessionsMu.Lock()
+	s.sessions[token] = time.Now().Add(8 * time.Hour)
+	s.sessionsMu.Unlock()
+
+	c.JSON(http.StatusOK, gin.H{"token": token, "expires_in": 28800})
+}
+
+func (s *Server) logout(c *gin.Context) {
+	token := requestToken(c)
+	s.sessionsMu.Lock()
+	delete(s.sessions, token)
+	s.sessionsMu.Unlock()
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func corsMiddleware() gin.HandlerFunc {
@@ -236,6 +327,19 @@ func (s *Server) clients(c *gin.Context) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	c.JSON(http.StatusOK, out)
+}
+
+func (s *Server) kickClient(c *gin.Context) {
+	cl, ok := s.broker.Clients.Get(c.Param("id"))
+	if !ok || cl.Closed() {
+		c.JSON(http.StatusNotFound, gin.H{"error": "客户端不存在或已断开"})
+		return
+	}
+	if err := s.broker.DisconnectClient(cl, packets.ErrAdministrativeAction); err != nil && err != packets.ErrAdministrativeAction {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func (s *Server) subscriptions(c *gin.Context) {
