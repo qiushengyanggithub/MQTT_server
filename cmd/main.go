@@ -5,14 +5,17 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	mqtt "github.com/mochi-mqtt/server/v2"
+	"github.com/mochi-mqtt/server/v2/api"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
@@ -23,6 +26,9 @@ func main() {
 	infoAddr := flag.String("info", ":8080", "network address for web info dashboard listener")
 	tlsCertFile := flag.String("tls-cert-file", "", "TLS certificate file")
 	tlsKeyFile := flag.String("tls-key-file", "", "TLS key file")
+	webAddr := flag.String("web-addr", ":8081", "network address for the web dashboard and REST API (empty to disable)")
+	webDist := flag.String("web-dist", "web/dist", "path to the built Vue3 frontend")
+	webToken := flag.String("web-token", "", "optional bearer token required by the web API")
 	flag.Parse()
 
 	sigs := make(chan os.Signal, 1)
@@ -45,7 +51,7 @@ func main() {
 		}
 	}
 
-	server := mqtt.New(nil)
+	server := mqtt.New(&mqtt.Options{InlineClient: true})
 	_ = server.AddHook(new(auth.AllowHook), nil)
 
 	tcp := listeners.NewTCP(listeners.Config{
@@ -86,8 +92,31 @@ func main() {
 		}
 	}()
 
+	var web *api.Server
+	if *webAddr != "" {
+		web, err = api.New(server, api.Config{
+			Addr:  *webAddr,
+			Dist:  *webDist,
+			Token: *webToken,
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+		go func() {
+			log.Printf("web dashboard listening on %s", *webAddr)
+			if err := web.Serve(); err != nil {
+				log.Fatal(err)
+			}
+		}()
+	}
+
 	<-done
 	server.Log.Warn("caught signal, stopping...")
+	if web != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = web.Close(ctx)
+		cancel()
+	}
 	_ = server.Close()
 	server.Log.Info("mochi mqtt shutdown complete")
 }
