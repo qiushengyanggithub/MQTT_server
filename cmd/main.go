@@ -23,7 +23,7 @@ import (
 func main() {
 	tcpAddr := flag.String("tcp", ":1883", "network address for TCP listener")
 	wsAddr := flag.String("ws", ":1882", "network address for Websocket listener")
-	infoAddr := flag.String("info", ":8080", "network address for web info dashboard listener")
+	infoAddr := flag.String("info", ":8082", "network address for web info dashboard listener")
 	tlsCertFile := flag.String("tls-cert-file", "", "TLS certificate file")
 	tlsKeyFile := flag.String("tls-key-file", "", "TLS key file")
 	webAddr := flag.String("web-addr", ":8081", "network address for the web dashboard and REST API (empty to disable)")

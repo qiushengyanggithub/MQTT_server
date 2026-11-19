@@ -23,7 +23,7 @@ go run ./cmd
 - Web 控制台：`http://localhost:8081`
 - MQTT TCP：`1883`
 - MQTT WebSocket：`1882`
-- 原有状态接口：`8080`
+- 原有状态接口：`8082`
 
 如果需要修改端口：
 

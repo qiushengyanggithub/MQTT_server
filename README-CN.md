@@ -63,7 +63,7 @@ MQTT 代表 MQ Telemetry Transport。它是一种发布/订阅、非常简单和
 
 ## 快速开始(Quick Start)
 ### 使用 Go 运行服务端
-Mochi MQTT 可以作为独立的中间件使用。只需拉取此仓库代码，然后在 [cmd](cmd) 文件夹中运行 [cmd/main.go](cmd/main.go) ，默认将开启下面几个服务端口， tcp (:1883)、websocket (:1882) 和服务状态监控 (:8080) 。
+Mochi MQTT 可以作为独立的中间件使用。只需拉取此仓库代码，然后在 [cmd](cmd) 文件夹中运行 [cmd/main.go](cmd/main.go) ，默认将开启下面几个服务端口， tcp (:1883)、websocket (:1882) 和服务状态监控 (:8082) 。
 
 ```
 cd cmd

@@ -6,3 +6,4 @@ vendor
 web/node_modules
 users.json
 webcheck.exe
+mqtt-server-linux-amd64
