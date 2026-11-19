@@ -12,6 +12,8 @@ import {
   DesktopOutlined,
   DisconnectOutlined,
   EditOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
   FilterOutlined,
   InboxOutlined,
   KeyOutlined,
@@ -60,6 +62,7 @@ const loggedIn = ref(Boolean(localStorage.getItem('mqtt_web_token')))
 const loginForm = ref({ username: 'admin', password: '' })
 const loginError = ref('')
 const loggingIn = ref(false)
+const showPassword = ref(false)
 
 const tab = ref('overview')
 const overview = ref(null)
@@ -445,7 +448,22 @@ onUnmounted(() => {
         </label>
         <label>
           <span class="field-label"><KeyOutlined /> 密码</span>
-          <input v-model="loginForm.password" type="password" autocomplete="current-password" placeholder="请输入密码" />
+          <div class="password-field">
+            <input
+              v-model="loginForm.password"
+              :type="showPassword ? 'text' : 'password'"
+              autocomplete="current-password"
+              placeholder="请输入密码"
+            />
+            <button
+              type="button"
+              class="password-toggle"
+              :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+              @click="showPassword = !showPassword"
+            >
+              <component :is="showPassword ? EyeInvisibleOutlined : EyeOutlined" />
+            </button>
+          </div>
         </label>
         <div v-if="loginError" class="error-banner"><CloseCircleOutlined /> {{ loginError }}</div>
         <button class="btn primary login-btn" type="submit" :disabled="loggingIn">

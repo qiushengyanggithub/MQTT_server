@@ -102,6 +102,35 @@ body {
   box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12);
 }
 
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 40px;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.password-toggle:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
 .login-btn {
   justify-content: center;
   height: 40px;
