@@ -431,10 +431,11 @@ func (s *Server) retained(c *gin.Context) {
 }
 
 type publishRequest struct {
-	Topic   string `json:"topic" binding:"required"`
-	Payload string `json:"payload"`
-	Qos     byte   `json:"qos"`
-	Retain  bool   `json:"retain"`
+	Topic    string `json:"topic" binding:"required"`
+	Payload  string `json:"payload"`
+	Qos      byte   `json:"qos"`
+	Retain   bool   `json:"retain"`
+	Encoding string `json:"encoding"`
 }
 
 func (s *Server) publish(c *gin.Context) {
@@ -447,7 +448,33 @@ func (s *Server) publish(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "qos must be 0, 1 or 2"})
 		return
 	}
-	if err := s.broker.Publish(req.Topic, []byte(req.Payload), req.Retain, req.Qos); err != nil {
+
+	payload := []byte(req.Payload)
+	switch req.Encoding {
+	case "", "utf8", "text":
+	case "base64":
+		decoded, err := base64.StdEncoding.DecodeString(req.Payload)
+		if err != nil {
+			decoded, err = base64.RawStdEncoding.DecodeString(req.Payload)
+		}
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid base64 payload"})
+			return
+		}
+		payload = decoded
+	case "hex":
+		decoded, err := hex.DecodeString(strings.TrimSpace(req.Payload))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid hex payload"})
+			return
+		}
+		payload = decoded
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported payload encoding"})
+		return
+	}
+
+	if err := s.broker.Publish(req.Topic, payload, req.Retain, req.Qos); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": err.Error(),
 			"hint":  "start the broker with inline_client enabled",
