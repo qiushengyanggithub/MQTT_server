@@ -126,27 +126,25 @@ go build -tags embedweb -o mqtt-server-all-in-one ./cmd
 
 原理：启用 `embedweb` 构建标签后，`web/dist` 会通过 `go:embed` 编译进二进制；运行时优先使用内嵌文件，`-web-dist` 参数在该模式下被忽略。这样部署时只需要一个可执行文件（用户数据文件 `users.json` 等仍按需携带）。
 
-交叉编译同样可以内嵌：
+交叉编译成 Debian 12 / AMD64 单文件（先 `npm run build`）：
 
 ```cmd
-set GOOS=linux
-set GOARCH=amd64
-set CGO_ENABLED=0
-go build -tags embedweb -trimpath -o mqtt-server-linux-amd64 ./cmd
+cd /d d:\GO\MQTT_server&&set GOOS=linux&&set GOARCH=amd64&&set CGO_ENABLED=0&&go build -tags embedweb -trimpath -o mqtt-server-linux-amd64 ./cmd
 ```
+
+> Windows CMD 里如果写成 `set GOOS=linux && ...`（`&&` 前留空格），变量值会带上尾随空格，导致 `unsupported GOOS/GOARCH pair linux /amd64`。请像上面一样紧贴 `&&`，或者分行写。
 
 ## 5. 交叉编译 Debian 12 / AMD64
 
-在 Windows 上生成 Linux AMD64 运行文件。
+在 Windows 上生成 Linux AMD64 运行文件。默认生成的是**前端内嵌的单文件**（`-tags embedweb`），部署时无需携带 `web/dist/`。
 
 ### 5.1 CMD 写法
 
 ```cmd
-set GOOS=linux
-set GOARCH=amd64
-set CGO_ENABLED=0
-go build -trimpath -o mqtt-server-linux-amd64 ./cmd
+cd /d d:\GO\MQTT_server&&set GOOS=linux&&set GOARCH=amd64&&set CGO_ENABLED=0&&go build -tags embedweb -trimpath -o mqtt-server-linux-amd64 ./cmd
 ```
+
+> `set GOOS=linux` 后不要留空格再接 `&&`，否则 GOOS 会变成 `linux `（带尾随空格），报 `unsupported GOOS/GOARCH pair linux /amd64`。
 
 ### 5.2 PowerShell 写法
 
@@ -154,13 +152,13 @@ go build -trimpath -o mqtt-server-linux-amd64 ./cmd
 $env:GOOS = "linux"
 $env:GOARCH = "amd64"
 $env:CGO_ENABLED = "0"
-go build -trimpath -o mqtt-server-linux-amd64 ./cmd
+go build -tags embedweb -trimpath -o mqtt-server-linux-amd64 ./cmd
 ```
 
 ### 5.3 可选：减小二进制体积
 
 ```bash
-go build -trimpath -ldflags="-s -w" -o mqtt-server-linux-amd64 ./cmd
+go build -tags embedweb -trimpath -ldflags="-s -w" -o mqtt-server-linux-amd64 ./cmd
 ```
 
 ### 5.4 参数说明
@@ -170,6 +168,7 @@ go build -trimpath -ldflags="-s -w" -o mqtt-server-linux-amd64 ./cmd
 | `GOOS=linux` | 目标操作系统为 Linux |
 | `GOARCH=amd64` | 目标架构为 x86_64 |
 | `CGO_ENABLED=0` | 禁用 CGO，避免依赖目标机器的 glibc / gcc |
+| `-tags embedweb` | 把 `web/dist` 前端编进二进制，生成单文件 |
 | `-trimpath` | 去除本地路径信息 |
 | `-ldflags="-s -w"` | 去掉符号表和调试信息，缩小体积 |
 
@@ -341,3 +340,13 @@ npm run build
 ```
 
 如果使用默认构建，重启 Go 服务即可，后端会直接从 `web/dist` 读取最新文件；如果使用单二进制模式，需要重新执行 `go build -tags embedweb ...` 生成新的可执行文件。
+
+### 9.6 报 `unsupported GOOS/GOARCH pair linux /amd64`
+
+这是 Windows CMD 中 `set GOOS=linux && ...` 的空格问题：`&&` 前留空格会把尾随空格写进变量，变成 `linux `。改成紧贴写法：
+
+```cmd
+set GOOS=linux&&set GOARCH=amd64&&set CGO_ENABLED=0&&go build -tags embedweb -trimpath -o mqtt-server-linux-amd64 ./cmd
+```
+
+或者把每个 `set` 单独写一行。
