@@ -48,6 +48,7 @@ go run ./cmd -tcp :18830 -ws :18831 -info :18832 -web-addr :8081
 2. 输入管理员提供的用户名和密码。
 3. 登录成功后，会话有效期为 8 小时。
 4. 点击右上角「退出」可注销当前会话。
+5. 点击右上角「重启后端」并确认后，会优雅关闭并重新启动 Broker 与 Web 服务；所有 MQTT 连接会断开，当前登录会话失效，服务恢复后页面自动跳回登录页。
 
 说明：
 
@@ -211,6 +212,7 @@ Base64 与 Hex 由服务端解码为原始字节后发布，接口字段为 `enc
 | GET | `/api/subscriptions` | 订阅列表 |
 | GET | `/api/retained` | 保留消息 |
 | POST | `/api/publish` | 发布消息 |
+| POST | `/api/restart` | 重启后端服务（需登录） |
 | GET | `/api/messages/stream` | SSE 实时消息流 |
 | GET | `/api/users` | 用户列表 |
 | POST | `/api/users` | 新建用户 |
@@ -279,3 +281,4 @@ go build -tags embedweb -o mqtt-server-all-in-one.exe ./cmd
 - 建议配合 HTTPS 使用，避免密码和会话 Token 明文传输
 - 用户密码当前会在页面明文显示，仅建议在内网或可信环境中使用
 - 如需更严格的控制，可在网关层限制 `/api` 和控制台访问来源
+- `/api/restart` 属于高权限操作，当前所有已登录 Web 用户均可调用，请谨慎保管管理员凭据

@@ -36,6 +36,7 @@ func main() {
 
 	sigs := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
+	restartRequested := make(chan struct{}, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigs
@@ -113,6 +114,12 @@ func main() {
 			WebUser:     *webUser,
 			WebPassword: *webPassword,
 			UserStore:   userStore,
+			OnRestart: func() {
+				select {
+				case restartRequested <- struct{}{}:
+				default:
+				}
+			},
 		})
 		if err != nil {
 			log.Fatal(err)
@@ -125,13 +132,36 @@ func main() {
 		}()
 	}
 
-	<-done
-	server.Log.Warn("caught signal, stopping...")
+	for {
+		select {
+		case <-done:
+			server.Log.Warn("caught signal, stopping...")
+			shutdown(server, web)
+			server.Log.Info("mochi mqtt shutdown complete")
+			return
+		case <-restartRequested:
+			exe, err := os.Executable()
+			if err != nil {
+				server.Log.Error("restart failed", "error", err)
+				continue
+			}
+			server.Log.Warn("restart requested, stopping...")
+			shutdown(server, web)
+			time.Sleep(500 * time.Millisecond)
+			if err := restartProcess(exe); err != nil {
+				server.Log.Error("restart failed", "error", err)
+				return
+			}
+			return
+		}
+	}
+}
+
+func shutdown(server *mqtt.Server, web *api.Server) {
 	if web != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = web.Close(ctx)
 		cancel()
 	}
 	_ = server.Close()
-	server.Log.Info("mochi mqtt shutdown complete")
 }

@@ -36,6 +36,7 @@ type Config struct {
 	WebUser     string
 	WebPassword string
 	UserStore   *UserStore
+	OnRestart   func()
 }
 
 // Server owns the Gin engine and its MQTT bridge hook.
@@ -55,6 +56,7 @@ type Server struct {
 	sessionsMu  sync.Mutex
 	sessions    map[string]time.Time
 	users       *UserStore
+	onRestart   func()
 }
 
 // New attaches a publish hook to the broker and builds the Gin routes.
@@ -74,6 +76,7 @@ func New(broker *mqtt.Server, cfg Config) (*Server, error) {
 		webPassword: cfg.WebPassword,
 		sessions:    make(map[string]time.Time),
 		users:       cfg.UserStore,
+		onRestart:   cfg.OnRestart,
 	}
 	if s.addr == "" {
 		s.addr = ":8081"
@@ -153,6 +156,7 @@ func (s *Server) routes() {
 		api.DELETE("/users/:username", s.deleteUser)
 		api.POST("/users/:username/disable", s.setUserDisallowed(true))
 		api.POST("/users/:username/enable", s.setUserDisallowed(false))
+		api.POST("/restart", s.restart)
 	}
 
 	s.static()
@@ -517,4 +521,13 @@ func (s *Server) streamMessages(c *gin.Context) {
 			flusher.Flush()
 		}
 	}
+}
+
+func (s *Server) restart(c *gin.Context) {
+	if s.onRestart == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "restart is not available"})
+		return
+	}
+	s.onRestart()
+	c.JSON(http.StatusOK, gin.H{"ok": true, "message": "restarting"})
 }

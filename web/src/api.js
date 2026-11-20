@@ -93,6 +93,8 @@ export function publishMessage(payload) {
   })
 }
 
+export const restartBackend = () => request('/restart', { method: 'POST' })
+
 export function streamMessages(onMessage) {
   const url = new URL('/api/messages/stream', window.location.origin)
   const current = token()

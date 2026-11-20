@@ -42,6 +42,7 @@ import {
   kickClient,
   setUserDisallowed,
   publishMessage,
+  restartBackend,
   streamMessages,
   setToken,
   login,
@@ -75,6 +76,8 @@ const error = ref('')
 const streamStatus = ref('connecting')
 const tokenInput = ref(localStorage.getItem('mqtt_web_token') || '')
 const publishResult = ref('')
+const restarting = ref(false)
+const restartResult = ref('')
 const form = ref({ topic: 'test/topic', payload: 'hello mqtt', qos: 0, retain: false, format: 'text' })
 
 const clientFilter = ref({ keyword: '', status: 'all' })
@@ -707,6 +710,47 @@ async function doLogout() {
   messages.value = []
 }
 
+async function doRestart() {
+  if (!window.confirm('确定重启后端服务吗？所有 MQTT 连接会断开，页面会短暂不可用。')) return
+  restarting.value = true
+  restartResult.value = '正在重启后端…'
+  try {
+    await restartBackend()
+  } catch (e) {
+    restartResult.value = `重启请求失败: ${e.message || e}`
+    restarting.value = false
+    return
+  }
+  restartResult.value = '后端正在重启，等待服务恢复…'
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+  const recovered = await waitForBackend()
+  if (!recovered) {
+    restartResult.value = '等待后端恢复超时，请手动刷新页面'
+    restarting.value = false
+    return
+  }
+  setToken('')
+  window.location.reload()
+}
+
+async function waitForBackend(timeoutMs = 30000) {
+  const start = Date.now()
+  let sawDown = false
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const response = await fetch('/api/health', { cache: 'no-store' })
+      if (sawDown && response.ok) return true
+    } catch (_) {
+      sawDown = true
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  return false
+}
+
 function handleAuthExpired() {
   if (eventSource) {
     eventSource.close()
@@ -809,6 +853,10 @@ onUnmounted(() => {
         </div>
         <button class="btn ghost" @click="applyToken">应用</button>
         <button class="btn primary" @click="refresh"><ReloadOutlined /> 刷新</button>
+        <button class="btn text danger" :disabled="restarting" @click="doRestart">
+          <ReloadOutlined /> {{ restarting ? '重启中…' : '重启后端' }}
+        </button>
+        <span v-if="restartResult" class="hint">{{ restartResult }}</span>
         <button class="btn ghost" @click="doLogout"><LogoutOutlined /> 退出</button>
       </div>
     </header>
