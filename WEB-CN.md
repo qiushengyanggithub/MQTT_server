@@ -232,7 +232,13 @@ npm install
 npm run build
 ```
 
-构建产物输出到 `web/dist/`，Go 服务会直接读取该目录。
+构建产物输出到 `web/dist/`，Go 服务默认直接读取该目录。如需编译成单二进制（前端内嵌），核心命令如下，详见 [BUILD-CN.md](BUILD-CN.md) 第 4.4 节：
+
+```cmd
+cd web && npm install && npm run build
+cd ..
+go build -tags embedweb -o mqtt-server-all-in-one.exe ./cmd
+```
 
 ## 8. 安全建议
 

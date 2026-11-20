@@ -35,13 +35,13 @@ MQTT_server/
 ├── api/                     # Gin API、用户管理、认证 Hook
 ├── web/
 │   ├── src/                 # Vue3 前端源码
-│   └── dist/                # 前端构建产物（Go 服务运行时读取）
+│   └── dist/                # 前端构建产物（可被 Go 内嵌，也可运行时读取）
 ├── WEB-CN.md                # Web 控制台说明书
 ├── BUILD-CN.md              # 本文档
 └── go.mod
 ```
 
-> 注意：Go 二进制不会把前端打包进去，部署时需要同时携带 `web/dist/`。
+> 注意：默认构建不会把前端打包进去，部署时需同时携带 `web/dist/`；使用 `-tags embedweb` 可编译成单文件。
 
 ## 3. 编译前端
 
@@ -100,6 +100,41 @@ chmod +x mqtt-server
 go run ./cmd
 ```
 
+### 4.4 单二进制构建（前端内嵌）
+
+先按第 3 节构建前端（`-tags embedweb` 编译时要求 `web/dist/` 已存在），再编译后端。
+
+完整核心命令（Windows CMD，最常用）：
+
+```cmd
+cd web && npm install && npm run build
+cd ..
+go build -tags embedweb -o mqtt-server-all-in-one.exe ./cmd
+```
+
+如果前端已经构建好，只需重新编译后端：
+
+```cmd
+go build -tags embedweb -o mqtt-server-all-in-one.exe ./cmd
+```
+
+或 Linux / macOS：
+
+```bash
+go build -tags embedweb -o mqtt-server-all-in-one ./cmd
+```
+
+原理：启用 `embedweb` 构建标签后，`web/dist` 会通过 `go:embed` 编译进二进制；运行时优先使用内嵌文件，`-web-dist` 参数在该模式下被忽略。这样部署时只需要一个可执行文件（用户数据文件 `users.json` 等仍按需携带）。
+
+交叉编译同样可以内嵌：
+
+```cmd
+set GOOS=linux
+set GOARCH=amd64
+set CGO_ENABLED=0
+go build -tags embedweb -trimpath -o mqtt-server-linux-amd64 ./cmd
+```
+
 ## 5. 交叉编译 Debian 12 / AMD64
 
 在 Windows 上生成 Linux AMD64 运行文件。
@@ -148,20 +183,25 @@ mqtt-server-linux-amd64
 
 ### 6.1 需要复制的文件
 
+默认构建（运行时读取前端）：
+
 ```text
 mqtt-server-linux-amd64
 web/dist/
 ```
 
-建议目录结构：
+单二进制构建（`-tags embedweb`）：
+
+```text
+mqtt-server-linux-amd64
+```
+
+建议目录结构（单二进制）：
 
 ```text
 /opt/mqtt/
 ├── mqtt-server-linux-amd64
-└── web/
-    └── dist/
-        ├── index.html
-        └── assets/
+└── users.json          # 按需携带
 ```
 
 ### 6.2 启动
@@ -169,8 +209,10 @@ web/dist/
 ```bash
 cd /opt/mqtt
 chmod +x mqtt-server-linux-amd64
-./mqtt-server-linux-amd64 -web-dist ./web/dist
+./mqtt-server-linux-amd64
 ```
+
+> 单二进制模式无需 `-web-dist`；默认构建仍需指定 `-web-dist ./web/dist`（或使用默认的相对路径且工作目录正确）。
 
 默认端口：
 
@@ -203,13 +245,16 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/mqtt
-ExecStart=/opt/mqtt/mqtt-server-linux-amd64 -web-dist /opt/mqtt/web/dist -users-file /opt/mqtt/users.json
+ExecStart=/opt/mqtt/mqtt-server-linux-amd64 -users-file /opt/mqtt/users.json
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+> 上面示例对应单二进制构建；若使用默认构建，请把 `ExecStart` 改为：
+> `ExecStart=/opt/mqtt/mqtt-server-linux-amd64 -web-dist /opt/mqtt/web/dist -users-file /opt/mqtt/users.json`
 
 启用服务：
 
@@ -233,7 +278,7 @@ docker run -p 1883:1883 -p 1882:1882 -p 8082:8082 -v $(pwd)/config.yaml:/config.
 
 - 该入口按 `config.yaml` 启动
 - 当前 Dockerfile **不启动 Web 控制台**
-- 如需在 Docker 中使用控制台，需要把构建目标改为 `./cmd`，并把前端构建产物打入镜像
+- 如需在 Docker 中使用控制台，可把构建目标改为 `./cmd` 并加上 `-tags embedweb`（需先执行 `npm run build`），这样前端会编译进二进制，无需在镜像中携带 `web/dist`
 
 ## 8. 常用启动参数
 
@@ -259,11 +304,10 @@ docker run -p 1883:1883 -p 1882:1882 -p 8082:8082 -v $(pwd)/config.yaml:/config.
 
 ### 9.1 打开页面提示“Frontend not built”
 
-说明 Go 服务没找到 `web/dist`。请确认：
+说明 Go 服务没找到前端文件。请确认：
 
-1. 已执行 `npm run build`
-2. 启动时 `-web-dist` 指向正确目录
-3. `web/dist/index.html` 确实存在
+1. 默认构建：已执行 `npm run build`，且 `-web-dist` 指向正确目录，`web/dist/index.html` 确实存在
+2. 单二进制构建：编译前已执行 `npm run build`，且使用了 `-tags embedweb`（编译时会检查 `web/dist` 是否存在）
 
 ### 9.2 Debian 上权限不足
 
@@ -296,4 +340,4 @@ cd web
 npm run build
 ```
 
-然后重启 Go 服务即可，后端会直接从 `web/dist` 读取最新文件。
+如果使用默认构建，重启 Go 服务即可，后端会直接从 `web/dist` 读取最新文件；如果使用单二进制模式，需要重新执行 `go build -tags embedweb ...` 生成新的可执行文件。

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ import (
 type Config struct {
 	Addr        string
 	Dist        string
+	DistFS      fs.FS
 	Token       string
 	WebUser     string
 	WebPassword string
@@ -44,6 +46,9 @@ type Server struct {
 	httpServer  *http.Server
 	addr        string
 	dist        string
+	distFS      fs.FS
+	assetFS     fs.FS
+	indexHTML   []byte
 	token       string
 	webUser     string
 	webPassword string
@@ -75,6 +80,19 @@ func New(broker *mqtt.Server, cfg Config) (*Server, error) {
 	}
 	if s.dist == "" {
 		s.dist = "web/dist"
+	}
+	if cfg.DistFS != nil {
+		index, err := fs.ReadFile(cfg.DistFS, "index.html")
+		if err != nil {
+			return nil, fmt.Errorf("read embedded frontend index.html: %w", err)
+		}
+		assets, err := fs.Sub(cfg.DistFS, "assets")
+		if err != nil {
+			return nil, fmt.Errorf("open embedded frontend assets: %w", err)
+		}
+		s.distFS = cfg.DistFS
+		s.assetFS = assets
+		s.indexHTML = index
 	}
 
 	s.engine = gin.New()
@@ -240,6 +258,18 @@ func corsMiddleware() gin.HandlerFunc {
 }
 
 func (s *Server) static() {
+	if s.distFS != nil {
+		s.engine.StaticFS("/assets", http.FS(s.assetFS))
+		s.engine.NoRoute(func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+				return
+			}
+			c.Data(http.StatusOK, "text/html; charset=utf-8", s.indexHTML)
+		})
+		return
+	}
+
 	info, err := os.Stat(s.dist)
 	if err != nil || !info.IsDir() {
 		s.engine.NoRoute(func(c *gin.Context) {

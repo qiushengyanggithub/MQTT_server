@@ -108,6 +108,7 @@ func main() {
 		web, err = api.New(server, api.Config{
 			Addr:        *webAddr,
 			Dist:        *webDist,
+			DistFS:      mqtt.WebDistFS(),
 			Token:       *webToken,
 			WebUser:     *webUser,
 			WebPassword: *webPassword,
