@@ -1,4 +1,4 @@
-# Mochi MQTT Web 控制台说明书
+# MqttServer Web 控制台说明书
 
 本文档说明基于 Vue3 + Gin 新增的 Web 管理控制台，包括启动方式、页面功能、用户权限以及常见问题。
 

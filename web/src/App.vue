@@ -436,7 +436,7 @@ onUnmounted(() => {
       <div class="login-brand">
         <span class="logo"><AntDesignOutlined /></span>
         <div>
-          <h1>Mochi MQTT 控制台</h1>
+          <h1>MqttServer 控制台</h1>
           <p>请登录后继续管理 Broker</p>
         </div>
       </div>
@@ -480,7 +480,7 @@ onUnmounted(() => {
       <div class="brand">
         <span class="logo"><AntDesignOutlined /></span>
         <div>
-          <h1>Mochi MQTT 控制台</h1>
+          <h1>MqttServer 控制台</h1>
           <p>MQTT Broker Web Dashboard</p>
         </div>
       </div>

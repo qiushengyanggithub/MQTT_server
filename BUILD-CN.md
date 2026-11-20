@@ -1,4 +1,4 @@
-# Mochi MQTT Web 控制台编译说明
+# MqttServer Web 控制台编译说明
 
 本文档说明如何编译前端、后端，以及生成 Debian 12 / AMD64 架构的可运行文件。
 
@@ -238,7 +238,7 @@ chmod +x mqtt-server-linux-amd64
 
 ```ini
 [Unit]
-Description=Mochi MQTT Server with Web Console
+Description=MqttServer with Web Console
 After=network.target
 
 [Service]

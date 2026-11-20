@@ -275,7 +275,7 @@ func (s *Server) static() {
 		s.engine.NoRoute(func(c *gin.Context) {
 			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(
 				"<!doctype html><html><body style=\"font-family:sans-serif;padding:40px\">"+
-					"<h1>Mochi MQTT Web</h1><p>Frontend not built.</p>"+
+					"<h1>MqttServer Web</h1><p>Frontend not built.</p>"+
 					"<p>Run <code>npm install &amp;&amp; npm run build</code> in <code>web/</code>.</p></body></html>"))
 		})
 		return
